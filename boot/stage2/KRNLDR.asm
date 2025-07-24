@@ -1,27 +1,65 @@
-org     0x0
-
 bits    16
+org     0x500
 jmp     main
 
-Print:
-			lodsb		            ; load next byte from string from SI to AL
-			or	    al,     al	    ; Does AL=0?
-			jz	    PrintDone	        ; Yep, null terminator found-bail out
-			mov	    ah,	    0eh	    ; Nope-Print the character
-			int	    10h
-			jmp	    Print	            ; Repeat until null terminator found
-PrintDone:
-			ret		; we are done, so return
-;   second stage
+%include "stdio.inc"
+%include "Gdt.inc"
+
+LoadingMsg      db      "Preparing to load rast system...",13,10,0
+
+; ###########################################
+;   Stage 2 entry point
+; ###########################################
+
 main:
         cli
-        push    cs  ; cs = ds
-        pop     ds
+        xor     ax,     ax              ; null segments
+        mov     ds,     ax
+        mov     es,     ax
+        mov     ax,     0x9000          ; stack begins at 0x0 - 0xffff
+        mov     ss,     ax
+        mov     sp,     0xFFFF
+        sti                             ; enable interrupts
 
-        mov     si,     msg
-        call    Print
-    
+        ; ###########################################
+        ;   print loading
+        ; ###########################################
+
+        mov     si,     LoadingMsg
+        call    puts16
+
+        ; ###########################################
+        ;   install gdt
+        ; ###########################################
+        call install_gdt
+
+        ; ###########################################
+        ;   go into pm mode
+        ; ###########################################    
+
+        cli 
+        mov     eax,    cr0
+        or      eax,    1
+        mov     cr0,    eax
+
+        jmp     0x08:stage3
+
+; ###########################################
+;   entry point for stage 3
+; ###########################################
+
+bits    32
+stage3:
+        
+        mov     ax,     0x10                            ; set data segments to data selector
+        mov     ds,     ax
+        mov     ss,     ax
+        mov     es,     ax
+        mov     esp,    0x90000                          ; stack begins from here
+
+; ###########################################
+;   STOP EXECUTION
+; ###########################################
+STOP:
         cli
         hlt
-
-msg	db	"Preparing to load rast system...",13,10,0

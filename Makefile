@@ -1,14 +1,15 @@
 # Directories
-BOOT_DIR ?= boot
-BIN_DIR ?= bin
+BOOT_DIR     ?= boot
+BIN_DIR      ?= bin
+INCLUDE_DIR  ?= include
 
 # Source files
-STAGE1_SRC := stage1/Boot1.asm
-STAGE2_SRC := stage2/KRNLDR.asm
+STAGE1_SRC   := stage1/Boot1.asm
+STAGE2_SRC   := stage2/KRNLDR.asm
 
 # Output binaries
-STAGE1_BIN := $(BIN_DIR)/Boot1.bin
-STAGE2_BIN := $(BIN_DIR)/KRNLDR.bin
+STAGE1_BIN   := $(BIN_DIR)/Boot1.bin
+STAGE2_BIN   := $(BIN_DIR)/KRNLDR.bin
 
 # Default target: build both stage 1 and stage 2
 all: $(STAGE1_BIN) $(STAGE2_BIN)
@@ -27,12 +28,12 @@ clean:
 $(STAGE1_BIN): $(BOOT_DIR)/$(STAGE1_SRC)
 	@echo "--- Assembling Stage 1: $< -> $@ ---"
 	mkdir -p $(BIN_DIR)
-	nasm -f bin $< -o $@
+	nasm -f bin -I$(INCLUDE_DIR)/ $< -o $@
 
 # Rule to build stage 2 (KRNLDR)
 $(STAGE2_BIN): $(BOOT_DIR)/$(STAGE2_SRC)
 	@echo "--- Assembling Stage 2: $< -> $@ ---"
 	mkdir -p $(BIN_DIR)
-	nasm -f bin $< -o $@
+	nasm -f bin -I$(INCLUDE_DIR)/ $< -o $@
 
 .PHONY: all run clean
