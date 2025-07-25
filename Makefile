@@ -4,8 +4,8 @@ BIN_DIR      ?= bin
 INCLUDE_DIR  ?= include
 
 # Source files
-STAGE1_SRC   := stage1/Boot1.asm
-STAGE2_SRC   := stage2/KRNLDR.asm
+STAGE1_SRC   := stage1/stage1.asm
+STAGE2_SRC   := stage2/stage2.asm
 
 # Output binaries
 STAGE1_BIN   := $(BIN_DIR)/Boot1.bin
@@ -28,7 +28,7 @@ clean:
 $(STAGE1_BIN): $(BOOT_DIR)/$(STAGE1_SRC)
 	@echo "--- Assembling Stage 1: $< -> $@ ---"
 	mkdir -p $(BIN_DIR)
-	nasm -f bin -I$(INCLUDE_DIR)/ $< -o $@
+	nasm -f bin $< -o $@
 
 # Rule to build stage 2 (KRNLDR)
 $(STAGE2_BIN): $(BOOT_DIR)/$(STAGE2_SRC)
