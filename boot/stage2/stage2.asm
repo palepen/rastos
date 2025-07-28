@@ -1,72 +1,74 @@
 bits    16
-org     0x500
+org     0x0000      ; FIX: Must be 0x0000 to match the load address from stage 1 (0x1000:0x0000)
 jmp     main
 
 %include "stdio.inc"
 %include "Gdt.inc"
 %include "A20.inc"
 
-LoadingMsg      db      "Preparing to load rast system...",13,10,0
+LoadingMsg      db      13, 10, "Stage 2 Loaded. Entering Protected Mode...", 13, 10, 0
 
 ; ###########################################
-;   Stage 2 entry point
-;       - store BIOS info
-;       - load Kernel
-;       - install gpt; and go into protected mode
-;       - go to stage3
+;  Stage 2 Entry Point
+;       - Setup Stack
+;       - Install GDT
+;       - Enable A20
+;       - Enter Protected Mode
+;       - Jump to Stage 3 (32-bit Kernel)
 ; ###########################################
 
 main:
-        ; stack and segment setup
+        ; --- Stack and segment setup ---
         cli
-        xor     ax,     ax              ; null segments
-        mov     ds,     ax
-        mov     es,     ax
-        mov     ax,     0x9000          ; stack begins at 0x0 - 0xffff
-        mov     ss,     ax
-        mov     sp,     0xFFFF
-        sti                             ; enable interrupts
+        xor     ax, ax          ; Null segments
+        mov     ds, ax
+        mov     es, ax
+        mov     ax, 0x9000      ; Stack segment at 0x9000
+        mov     ss, ax
+        mov     sp, 0xFFFF      ; Stack pointer at the top
+        sti                     ; Re-enable interrupts for now
 
-        ; ###########################################
-        ;   print loading
-        ; ###########################################
-
-        mov     si,     LoadingMsg
+        ; --- Print loading message ---
+        mov     si, LoadingMsg
         call    puts16
 
-        ; ###########################################
-        ;   install gdt
-        ; ###########################################
-        call install_gdt
+        ; --- Install GDT ---
+        call    install_gdt
 
-        ; ###########################################
-        ;   Enable A20
-        ; ###########################################
+        ; --- Enable A20 Line ---
+        call    enable_a20_sys_control_a
 
-        call    enable_a20_kkbrd_out
+        ; --- Enter Protected Mode ---
+        cli                     ; Disable interrupts before mode switch
+        mov     eax, cr0
+        or      eax, 1
+        mov     cr0, eax
 
-        ; ###########################################
-        ;   go into pm mode
-        ; ###########################################    
+        ; --- Far jump to flush CPU pipeline and set CS to our 32-bit code descriptor ---
+        jmp     CODE_DESC:stage3
 
-        cli 
-        mov     eax,    cr0
-        or      eax,    1
-        mov     cr0,    eax
-
-        jmp     0x08:stage3
-        ;  if we enable the interrupts here it will cause triple faults
 ; ###########################################
-;   entry point for stage 3
+;  Stage 3: 32-bit Protected Mode Entry
 ; ###########################################
 
 bits    32
 stage3:
-       ; set registers 
-        mov     ax,     0x10                            ; set data segments to data selector
-        mov     ds,     ax
-        mov     ss,     ax
-        mov     es,     ax
-        mov     esp,    0x90000                          ; stack begins from here
+        ; --- Set up 32-bit segments and stack ---
+        mov     ax, DATA_DESC   ; Set data segments to our data selector
+        mov     ds, ax
+        mov     ss, ax
+        mov     es, ax
+        mov     esp, 0x90000    ; New 32-bit stack
+
+        ; --- Clear screen and print success message ---
+        call    clr_scr32
+        mov     ebx, msg
+        call    puts32
+
+        ; --- Halt ---
         cli
         hlt
+
+msg:
+    db 0x0A, 0x0A, 0x0A, "         <[ RASTOS ]>", 0x0A, 0x0A
+    db "      Welcome to 32-bit Protected Mode!", 0

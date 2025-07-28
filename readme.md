@@ -565,3 +565,77 @@ Call your chosen A20 method at the start of your bootloader’s second stage:
 ```
 call enable_a20_sys_control_a ; Or enable_a20_kkbrd, enable_a20_kkbrd_out
 ```
+
+# Operating Systems Development: Prepare for the Kernel (Part 1) - VGA Programming Guide
+
+
+## VGA Theory and Architecture
+
+### Video Graphics Array (VGA) Overview
+
+The **VGA** is an analog display standard introduced by IBM in 1987. It replaced multiple logic chips with a single ISA board containing:
+
+- **Video Buffer**: Memory-mapped display data storage
+- **Video DAC**: Digital-to-analog converter for color output
+- **CRT Controller**: Generates sync signals and cursor timing
+- **Sequencer**: Controls memory timing and character clocks
+- **Graphics Controller**: Interface between video memory and display
+- **Attribute Controller**: Manages color palettes and attributes
+
+### Memory Mapping
+
+VGA uses **memory-mapped I/O** at specific address ranges:
+
+| **Address Range** | **Purpose** |
+|-------------------|-------------|
+| `0xA0000-0xBFFFF` | Graphics modes |
+| `0xB0000-0xB7777` | Monochrome text mode |
+| `0xB8000-0xBFFFF` | **Color text mode** (Mode 7) |
+
+**Key Point**: Writing to these memory addresses directly changes what appears on screen.
+
+### Text Mode 7 Specifications
+
+- **Resolution**: 80 columns × 25 rows
+- **Memory Start**: `0xB8000`
+- **Character Format**: 2 bytes per character (character + attribute)
+- **Total Memory**: 80 × 25 × 2 = 4,000 bytes
+
+## Character Display Fundamentals
+
+### Memory Layout and Addressing
+
+Each character cell uses **2 bytes**:
+1. **Byte 0**: ASCII character code
+2. **Byte 1**: Attribute byte (color/formatting)
+
+**Position Formula**: `address = base + (y × COLS + x) × 2`
+
+Where:
+- `base` = `0xB8000` (start of video memory)
+- `COLS` = 80 (characters per row)
+- `x`, `y` = column, row positions (0-based)
+
+### Attribute Byte Format
+
+```
+Bit: 7 6 5 4 3 2 1 0
+| | | | | | | |
+B R G B I R G B
+| || | ||
+| BG | | FG |
+| | |____|
+BLINK INTENSITY
+```
+
+- **Bits 0-2**: Foreground color (RGB)
+- **Bit 3**: Foreground intensity
+- **Bits 4-6**: Background color (RGB)
+- **Bit 7**: Blink or background intensity
+
+**Color Values**:
+```
+0=Black, 1=Blue, 2=Green, 3=Cyan, 4=Red, 5=Magenta, 6=Brown, 7=Light Gray
+8=Dark Gray, 9=Light Blue, 10=Light Green, 11=Light Cyan
+12=Light Red, 13=Light Magenta, 14=Yellow, 15=White
+```

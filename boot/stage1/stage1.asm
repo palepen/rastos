@@ -1,278 +1,271 @@
 bits 	16								; 16 bit mode
-org		0						;start at this mem adress
-
-
+org		0x7C00							; BIOS loads us here.
 
 start:	jmp main
 
 ; ###########################################
-;   OEM Parameter Block
+;   OEM Parameter Block (BIOS Parameter Block)
 ; ###########################################
-bpbOE					db "RastOS "
-bpbBytesPerSector: 		dw 512
-bpbSectorPerCluster: 	db 1
-bpbReservedSectors:		dw 1
-bpbNumberOfFATs: 	    db 2
-bpbRootEntries: 	    dw 224
-bpbTotalSectors: 	    dw 2880
-bpbMedia: 	            db 0xF0
-bpbSectorsPerFAT: 	    dw 9
-bpbSectorsPerTrack: 	dw 18
-bpbHeadsPerCylinder: 	dw 2
-bpbHiddenSectors: 	    dd 0
-bpbTotalSectorsBig:     dd 0
-bsDriveNumber: 	        db 0
-bsUnused: 	            db 0
-bsExtBootSignature: 	db 0x29
-bsSerialNumber:	        dd 0xa0a1a2a3
-bsVolumeLabel: 	        db "MOS FLOPPY "
-bsFileSystem: 	        db "FAT12   "
+bpbOEM					db "RastOS "
+bpbBytesPerSector 		dw 512
+bpbSectorPerCluster 	db 1
+bpbReservedSectors		dw 1
+bpbNumberOfFATs 		db 2
+bpbRootEntries 			dw 224
+bpbTotalSectors 		dw 2880
+bpbMedia 				db 0xF0
+bpbSectorsPerFAT 		dw 9
+bpbSectorsPerTrack 		dw 18
+bpbHeadsPerCylinder 	dw 2
+bpbHiddenSectors 		dd 0
+bpbTotalSectorsBig 		dd 0
+bsDriveNumber 			db 0
+bsUnused 				db 0
+bsExtBootSignature 		db 0x29
+bsSerialNumber			dd 0xa0a1a2a3
+bsVolumeLabel 			db "RASTOS FLP "
+bsFileSystem 			db "FAT12   "
 
-msg 	db	"Welcome to Rast OS!", 0 	; to print a string
 
-print: 							; loads the character one by one and outputs them in the video stream till it encounters 0
+print: 							; Simple print string function
 		lodsb
 		or		al,		al
-		jz		print_done
+		jz		.done
 		mov		ah,		0x0e
 		int		0x10
 		jmp 	print
-
-print_done:
+.done:
 		ret
 
 ; ###########################################
-;   Sector Reader
+;   Sector Reader (LBA)
 ; ###########################################
-
 read_sector:
-	.main:
-		mov		di,		0x0005		; 5 retries for error
-	.sector_loop:
+.read_next_sector:
+		mov		di,		5		; 5 retries for error
+.sector_retry_loop:
 		push	ax
-		push	dx
+		push	bx
 		push	cx
-		call	lba_chs								; convert lba(starting sector) to chs
-		mov		ah, 	0x02						; Bios read sector
-		mov		al,		0x01						; read one sector		
-		mov		ch,		BYTE [absoluteTrack]		; track
-		mov 	cl,		BYTE [absoluteSector]		; sector
-		mov		dh,		BYTE [absoluteHead]			; head
-		mov		dl,		BYTE [bsDriveNumber]		; drive
-		int		0x13								; invoke Bios
-		jnc 	.success								; test for read error
-		xor		ax,		ax							; Bios rest disk
-		int		0x13								; invoke bios
+		push	dx
+
+		call	lba_chs								; Convert LBA (in ax) to CHS
+		mov		ah, 	0x02						; BIOS read sector function
+		mov		al,		0x01						; Read one sector
+		mov		ch,		BYTE [absoluteTrack]		; Track
+		mov 	cl,		BYTE [absoluteSector]		; Sector
+		mov		dh,		BYTE [absoluteHead]			; Head
+		mov		dl,		BYTE [bsDriveNumber]		; Drive from BPB
+		int		0x13								; Invoke BIOS interrupt
+		jnc 	.success							; Success if carry flag is not set
+
+		; --- Read failed, try again ---
+		xor		ax,		ax							; BIOS reset disk function
+		int		0x13								; Invoke BIOS interrupt
 		dec		di
+		
+		pop		dx
 		pop		cx
 		pop		bx
 		pop		ax
-		jnz		.sector_loop
-	.success:
-		mov		si,		msg_progress
-		call 	print
+		jnz		.sector_retry_loop
+		jmp 	read_failure						; All retries failed
+
+.success:
+		pop		dx
 		pop		cx
 		pop		bx
 		pop		ax
-		add		bx,		WORD [bpbBytesPerSector]	; queue next buffer
-		inc		ax									; queue next sector
-		loop    .main								; read next sector
+		add		bx,		WORD [bpbBytesPerSector]	; Queue next buffer
+		inc		ax									; Queue next sector (LBA)
+		loop	.read_next_sector					; Read next sector if loop counter is not zero
 		ret
 
-
 ; ###########################################
-; 		Convert CHS to LBA
-;		LBA = (cluster - 2) * sectors per cluster
+; 		Cluster to LBA
 ; ###########################################
-
 cluster_lba:
-		sub 	ax,		0x0002						; zero base cluster number
+		sub 	ax,		2							; Zero base cluster number
 		xor		cx,		cx
-		mov		cl,		BYTE [bpbSectorPerCluster]	; convert byte to word
-		mul		cx
-		add		ax,		WORD [datasector]			; base data sector
+		mov		cl,		BYTE [bpbSectorPerCluster]	; Sectors per cluster
+		mul		cx									; ax = (cluster - 2) * sectors per cluster
+		add		ax,		WORD [datasector]			; Add data sector offset
 		ret
 
 ; ###########################################
-;   LBA to CHS
-;	AX => LBA address to convert
-;	
-;	absolute sector = (logical sector / sectors per track) + 1
-;	absolute head = (logivcal sector / sector per track) % number of heads
-;	absolute track = logical sector / (sectors per track * number of heads)	
+;   LBA to CHS
 ; ###########################################
-
 lba_chs:
-		xor 	dx,		dx				
-		div  	WORD [bpbSectorsPerTrack]
-		inc 	dl										; for sector 0
+		xor 	dx,		dx
+		div		WORD [bpbSectorsPerTrack]			; ax = LBA / SectorsPerTrack, dx = LBA % SectorsPerTrack
+		inc 	dl										; Sector = (LBA % SectorsPerTrack) + 1
 		mov		BYTE [absoluteSector], 	dl
+		
 		xor		dx,		dx
-		div 	WORD [bpbHeadsPerCylinder]	
-		mov		BYTE [absoluteHead], 	dl
-		mov		BYTE [absoluteTrack],	dl
+		div 	WORD [bpbHeadsPerCylinder]			; ax = Quotient / Heads, dx = Quotient % Heads
+		mov		BYTE [absoluteHead], 	dl			; Head = (LBA / SectorsPerTrack) % Heads
+		mov		BYTE [absoluteTrack],	al			; Track = LBA / (SectorsPerTrack * Heads)
 		ret
 
 ; ###########################################
-;   Bootloader Entry Point
+;   Bootloader Entry Point
 ; ###########################################
-
 main:
+		; --- Setup Segments and Stack ---
 		cli
-		mov		ax,		0x07C0						; registers that point to our segment
+		mov		ax,		0x07C0
 		mov		ds,		ax
 		mov		es,		ax
-		mov		fs,		ax
-		mov		gs,		ax		
-
-		mov		ax, 	0x0000						; set the stack
-		mov 	ss, 	ax
+		
+		mov 	ax, 	0x0000
+		mov		ss, 	ax
 		mov		sp,		0xFFFF
-		sti											; restore interrupt
+		sti
 
 load_root:
-		; compute size of root directory and then store in cx
+		; --- Compute size of root directory in sectors (store in cx) ---
 		xor		cx,		cx
 		xor		dx,		dx
-		mov		ax,		0x0020						; 32 byte directory Entry
-		mul		WORD [bpbRootEntries]			
-		div     WORD [bpbBytesPerSector]
+		mov		ax,		32							; 32 byte directory entry
+		mul		WORD [bpbRootEntries]
+		div		WORD [bpbBytesPerSector]
 		xchg	ax,		cx
 
-		; compute loc of root directory
+		; --- Compute location of root directory (LBA) ---
 		mov 	al, 	BYTE [bpbNumberOfFATs]
 		mul		WORD [bpbSectorsPerFAT]
 		add		ax,		WORD [bpbReservedSectors]
-		mov		WORD [datasector], 	ax
-		mov		WORD [datasector], 	cx
 		
-		;read root directory into memory
+		mov 	si, 	ax							; Save root directory LBA
+		
+		mov 	WORD [datasector], ax 				; First data sector starts after root dir
+		add		WORD [datasector], cx
 
-		mov		bx,	0x2000							; copy root dir above bootcode
+		; --- Read root directory into memory ---
+		mov		ax, 	si							; Restore root directory LBA for the read
+		mov		bx,		0x2000						; Load root directory to 0x07C0:0x2000
 		call 	read_sector
 
 ; ###########################################
-;   Find Stage 2
+;   Find Stage 2 ("KRNLDR.BIN")
 ; ###########################################
-
-; browse root directory for binary image
-
-		mov		cx,		WORD [bpbRootEntries]		; load loop counter
-		mov		di,		0x0200						; locate the first root entry
+find_image:
+		mov		cx,		WORD [bpbRootEntries]
+		mov		di,		0x2000						; Start search at memory location of root directory
 
 .loop:
 		push	cx
-		mov		cx,		0x000B						; eleven character name
-		mov 	si,		image_name					; image name to find
+		mov		cx,		11							; Compare 11 characters
+		mov 	si,		image_name
 		push 	di
-
-		rep cmpsb									; reapeat the cmpsb instruction cx times
+		rep 	cmpsb								; Compare our name with the directory entry
 		pop		di
-		je		load_fat
+		je		load_fat							; Found it!
 		pop		cx
-		add		di,		0x0020						; queue the next directory entry
+		add		di,		32							; Queue the next directory entry
 		loop	.loop
-		jmp 	failure
+		jmp 	failure								; Didn't find it
 
 ; ###########################################
-;   Load FAT
+;   Load FAT and Stage 2 Image
 ; ###########################################
-
 load_fat:
-		; save starting cluster of boot image
-
-		mov		si,		msgCRLF
+		mov		si,		msg_found
 		call	print
-		mov		dx,		WORD [di + 0x001A]			; file's first cluster
 
-		; compute size of FAT and store in cx
-		
+		mov		dx,		WORD [di + 0x001A]			; File's first cluster from directory entry
+		mov		WORD [cluster], dx					; Store the cluster!
+
+		; --- Compute size of FAT in sectors (store in cx) ---
 		xor		ax, 	ax
-		mov		al, 	BYTE [bpbNumberOfFATs]		
+		mov		al, 	BYTE [bpbNumberOfFATs]
 		mul		WORD [bpbSectorsPerFAT]
 		mov		cx,		ax
 
-		; compute loc of FAT and store in ax
-
-		mov		ax, WORD [bpbReservedSectors]		; adjust for bootsector
-
-		; read FAT into mem
-		
-		mov 	bx, 	0x0200						; copy FAT above bootcode
+		; --- Compute location of FAT (LBA) and read it ---
+		mov		ax, 	WORD [bpbReservedSectors]
+		mov 	bx, 	0x8000						; Load FAT to a safe place: 0x07C0:0x8000
 		call 	read_sector
 
-		; read image file inot memory
-
-		mov		si, 	msgCRLF
+		; --- Prepare to load the image file ---
+		mov		si, 	msg_loading
 		call 	print
-		mov		ax,		0x0050
-		mov 	es,	 	ax							; destination for image
-		mov 	bx,		0x0000						; destination for image
+		
+		mov		ax,		0x1000
+		mov 	es,	 	ax							; Destination segment for image
+		mov 	bx,		0x0000						; Destination offset for image
 		push	bx
 
-; ###########################################
-;   Load Stage 2
-; ###########################################
-
-load_image:
-		mov	ax,		WORD [cluster]					; cluster to read
-		pop 	bx									; buffer to read into
-		call	cluster_lba							; convert cluster to LBA
+load_image_loop:
+		mov		ax,		WORD [cluster]				; Cluster to read
+		pop 	bx									; Buffer offset to read into
+		call	cluster_lba							; Convert cluster to LBA
 		xor		cx,		cx
-		mov		cl,		BYTE [bpbSectorPerCluster]	; sectors to read
+		mov		cl,		BYTE [bpbSectorPerCluster]	; Sectors to read
 		call	read_sector
 		push 	bx
 
-		; compute next cluster
-
+		; --- Compute next cluster from FAT ---
 		mov		ax, 	WORD [cluster]
 		mov		cx, 	ax
 		mov		dx, 	ax
-		shr		dx,   	0x0001						; div by 2
-		add		cx, 	dx							; sum for 3 / 2
-		mov		bx,		0x0200						; location of FAT in mem
-		add		bx,		cx							; index into FAT
-		mov 	dx, 	WORD [bx]					; read two bytes from FAT
-		test 	ax, 	0x0001
+		shr		dx,		1							; dx = ax / 2
+		add		cx, 	dx							; cx = ax * 1.5 (index into FAT)
+		mov		bx,		0x8000						; Location of FAT in memory
+		add		bx,		cx							; Index into FAT
+		mov 	dx, 	WORD [bx]					; Read two bytes from FAT
+
+		; --- Isolate the 12-bit cluster number ---
+		test 	ax, 	0x0001						; Check for odd cluster
 		jnz		.odd_cluster
 
 .even_cluster:
-		and 	dx, 	0000111111111111b			; take low 12 bits
-		jmp  	.done
+		and 	dx, 	0x0FFF						; For even, take low 12 bits
+		jmp 	.done_cluster
 
 .odd_cluster:
-		shr 	dx, 	0x0004						; take high 12 bits
+		shr 	dx, 	4							; For odd, take high 12 bits
 
-.done:
-		mov 	WORD [cluster],	dx					; start new cluster
-		cmp		dx, 	0x0FF0
-		jb 		load_image
+.done_cluster:
+		mov 	WORD [cluster],	dx					; Store the new cluster number
+		cmp		dx, 	0xFF0						; Check for end-of-file marker
+		jb 		load_image_loop						; If not EOF, load the next cluster
 
-done:	
-		mov 	si, msgCRLF
+done:
+		mov 	si, 	msg_success
 		call 	print
-		push	WORD 0x0050
-		push 	WORD 0x0000
-		retf 
+		jmp 	0x1000:0x0000						; Jump to our loaded kernel!
 
 failure:
 		mov 	si, 	msg_failure
 		call	print
 		mov 	ah, 	0x00
-		int 	0x16								; await key press
-		int 	0x19								; warm boot computer
+		int 	0x16								; Await key press
+		int 	0x19								; Warm boot computer
 
-absoluteSector 	db 	0x00
+read_failure:
+		mov 	si, 	msg_read_failed
+		call	print
+		jmp 	failure
+
+; ###########################################
+;   Data and Variables
+; ###########################################
+absoluteSector	db	0x00
 absoluteHead	db 	0x00
 absoluteTrack	db 	0x00
 
 datasector		dw 	0x0000
-cluster			dw 	0x000
-image_name		db  "KRNLDR  BIN"
-msg_loading		db 	0x0D, 0x0A, "Loading Boot Image ", 0x0D, 0x0A, 0x00
-msgCRLF 		db	0x0D, 0x0A, 0x00
-msg_progress	db 	"*", 0x00
-msg_failure		db	0x0D, 0x0A, "ERROR: Press Any Key to Reboot", 0x0A, 0x00
+cluster			dw 	0x0000
+image_name		db	"KRNLDR  BIN" ; 8.3 filename, space padded
 
-times 510 - ($ - $$) db 0	;set the unused 512 bytes to 0
-dw		0xAA55		; boot signature INT 0x19 will load and execute the boot loader
+; FIX: Shortened all messages to save space.
+CRLF			db  0x0D, 0x0A, 0x00
+msg_found		db	"Found. ", 0x00
+msg_loading		db 	"Loading... ", 0x00
+msg_success		db	"OK", 0x0D, 0x0A, 0x00
+msg_failure		db	"File not found.", 0x0D, 0x0A, 0x00
+msg_read_failed db	"Read fail.", 0x0D, 0x0A, 0x00
+
+times 510 - ($ - $$) db 0
+dw		0xAA55

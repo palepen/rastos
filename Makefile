@@ -9,15 +9,29 @@ STAGE2_SRC   := stage2/stage2.asm
 
 # Output binaries
 STAGE1_BIN   := $(BIN_DIR)/Boot1.bin
-STAGE2_BIN   := $(BIN_DIR)/KRNLDR.bin
+STAGE2_BIN   := $(BIN_DIR)/KRNLDR.BIN
+FLOPPY_IMG   := $(BIN_DIR)/floppy.img
 
-# Default target: build both stage 1 and stage 2
-all: $(STAGE1_BIN) $(STAGE2_BIN)
+# Default target: build floppy image
+all: $(FLOPPY_IMG)
 
-# QEMU run using only stage 1 boot sector (bootable floppy)
-run: $(STAGE1_BIN)
+# Create bootable floppy image
+$(FLOPPY_IMG): $(STAGE1_BIN) $(STAGE2_BIN)
+	@echo "--- Creating bootable floppy image ---"
+	# Create blank 1.44MB floppy
+	dd if=/dev/zero of=$@ bs=512 count=2880
+	# Format as FAT12
+	mkfs.fat -F 12 -n "RASTOS" $@
+	# Copy stage2 to floppy BEFORE installing boot sector
+	mcopy -i $@ $(STAGE2_BIN) ::KRNLDR.BIN
+	# Install stage1 as boot sector (this must be last!)
+	dd if=$(STAGE1_BIN) of=$@ bs=512 count=1 conv=notrunc
+	@echo "--- Floppy image created successfully ---"
+
+# QEMU run using the complete floppy image
+run: $(FLOPPY_IMG)
 	@echo "--- Running bootloader in QEMU ---"
-	qemu-system-i386 -drive file=$(STAGE1_BIN),format=raw,index=0,if=floppy
+	qemu-system-i386 -drive file=$(FLOPPY_IMG),format=raw,index=0,if=floppy
 
 # Clean all binaries
 clean:
