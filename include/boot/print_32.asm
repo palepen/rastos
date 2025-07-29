@@ -4,10 +4,10 @@
 ; 0xb8000 + 2 * (row * 80 + col)
 
 BITS 32
-
+; ip at bx
 ; define constants
 VIDEO_MEMORY equ 0xb8000
-WHITE_ON_BLACK equ 0x0f
+WHITE_ON_BLACK equ 0x8A
 
 print_string_pm:
     pusha
@@ -28,4 +28,19 @@ print_string_pm_loop:
 
 print_string_pm_done:
     popa
+    ret
+
+clear_screen_pm:
+    pushad
+    mov     edi, VIDEO_MEMORY   ; Start of video memory
+    mov     ecx, 80 * 25        ; Total number of screen characters (80x25)
+    mov     ah, WHITE_ON_BLACK  ; Color attribute
+    mov     al, ' '             ; Character to print (a space)
+
+.clear_loop:
+    mov     [edi], ax           ; Write space character with color
+    add     edi, 2              ; Move to the next character position
+    loop    .clear_loop         ; Repeat for the whole screen
+
+    popad
     ret

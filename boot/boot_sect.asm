@@ -1,50 +1,47 @@
 BITS 16
 ORG 0x7C00
+
 start:
-    ; ds = es = 0
-    xor     ax, ax
-    mov     ds, ax
-    mov     es, ax
+    ; --- Setup a safe environment ---
+    mov bp, 0x9000      ; Set up a stack
+    mov sp, bp
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
 
-    mov     bp, 0x8000
-    mov     sp, bp
+    ; --- Load the Kernel from Disk ---
+    mov si, MSG_REAL_MODE
+    call print
     
-    mov     bx, 0x9000      ; es:bx = 0x0000:0x9000 = 0x09000
-    mov     dh, 2           ; read 2 sectors
+    ; Load 2 sectors from the disk starting at sector 2 (the one after the bootloader)
+    ; to memory address 0x1000.
+    mov bx, KERNEL_LOAD_ADDRESS ; ES:BX is the buffer address (0x0000:0x1000)
+    mov ah, 0x02                ; Read sectors function
+    mov al, 2                   ; Number of sectors to read
+    mov ch, 0                   ; Cylinder 0
+    mov cl, 2                   ; Start at sector 2
+    mov dh, 0                   ; Head 0
+    int 0x13
+    jc disk_error               ; Jump if carry flag is set (error)
 
-    call    disk_load
-    
-    mov     dx, [0x9000]
-    call    print_hex
+    ; --- Switch to Protected Mode ---
+    call switch_to_pm
+    jmp $ ; Should not be reached
 
-    call    print_newline
+disk_error:
+    mov si, DISK_ERROR_MSG
+    call print
+    hlt
 
-    mov     dx, [0x9000 + 512] 
-    call    print_hex
-    call    print_newline
-
-    ; This is no longer needed since DS is already 0
-    ; xor     ax, ax
-    ; mov     ds, ax
-
-    mov     si, intro
-    call    print
-    call    print_newline
-
-    jmp     $
-
+; --- Includes ---
 %include "boot/stdio.asm"
-%include "boot/disk_io.asm"
+%include "boot/gdt_32.asm"
+%include "boot/switch_32.asm"
 
+; --- Data ---
+MSG_REAL_MODE       db "16-bit Real Mode: Loading kernel...", 13, 10, 0
+DISK_ERROR_MSG      db "Disk read error", 0
+KERNEL_LOAD_ADDRESS equ 0x1000
 
-
-intro   db "Welcome to rastOS", 0x00
-
-; Padding and boot signature
-times       510 - ($ - $$) db 0
-dw          0xAA55
-
-; boot sector = sector 1 of cyl 0 of head 0 of hdd 0
-; from now on = sector 2 ...
-times 256 dw 0xdada ; sector 2 = 512 bytes
-times 256 dw 0xface ; sector 3 = 512 bytes
+times 510 - ($ - $$) db 0
+dw 0xAA55

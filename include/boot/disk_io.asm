@@ -25,14 +25,12 @@ disk_error:
     call    print
     call    print_newline
     mov     dh, ah       ; ah = error code and dl = disk drive
-    jmp     disk_loop
-
+    ret
 sectors_error:
     mov     si, SECTORS_ERROR
     call    print
     
-disk_loop:
-    jmp     $
+
 
 DISK_ERROR: db "Disk read error", 0
 SECTORS_ERROR: db "Incorrect number of sectors read", 0
