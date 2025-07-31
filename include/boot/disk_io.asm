@@ -1,3 +1,5 @@
+%ifndef __DISK_IO_RASTOS_INCLUDE__
+%define __DISK_IO_RASTOS_INCLUDE__
 ; load dh sectors from drive dl into ES:BX
 disk_load:
     pusha
@@ -34,3 +36,4 @@ sectors_error:
 
 DISK_ERROR: db "Disk read error", 0
 SECTORS_ERROR: db "Incorrect number of sectors read", 0
+%endif

@@ -1,3 +1,5 @@
+%ifndef __STDIO_RASTOS_INCLUDE__
+%define __STDIO_RASTOS_INCLUDE__
 ; ip: si stores the string address
 print:
     lodsb           ; Load byte at DS:SI into AL, increment SI
@@ -53,3 +55,5 @@ print_hex:
     ret
 
 HEX_OUT     db '0x0000', 0
+
+%endif
